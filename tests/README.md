@@ -7,3 +7,4 @@ The extensions here are just starting points for test setup. If you need functio
 ## Available Test Extensions:
 * [Golang](/tests/golang)
 * [Javascript](/tests/javascript)
+* [Tilt](/tests/tilt)

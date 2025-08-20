@@ -1,0 +1,72 @@
+# buildifier: disable=module-docstring
+load("../Tiltfile", "test_tilt")
+
+config.define_string("test-name")
+config.define_bool("fatal-on-fail")
+cfg = config.parse()
+test_name = cfg.get("test-name", None)
+fatal_on_fail = cfg.get("fatal-on-fail", False)
+
+# buildifier: disable=function-docstring
+def tests():
+    def _fixtures():
+        return struct(
+            actual = "foo",
+            expected = "foo",
+            null = None,
+            not_null = "not null",
+        )
+
+    def test_assert(test, fixtures):
+        test.assert("exact", fixtures.expected, fixtures.actual)
+        test.assert("equality", True, 2 + 2 == 4)
+
+    def test_assert_fatal(test, _fixtures):
+        test.assert("success", True, True)
+        test.assert("failure", True, False, "intentional failure")
+
+    def test_assert_false(test, fixtures):
+        test.false("exact", False)
+        test.false("equality", 2 + 2 == 5)
+        test.false("is null", fixtures.not_null == None)
+        test.false("is not null", fixtures.null != None)
+
+    def test_assert_true(test, fixtures):
+        test.true("exact", True)
+        test.true("equality", 2 + 2 == 4)
+        test.true("is null", fixtures.null == None)
+        test.true("is not null", fixtures.not_null != None)
+
+    return struct(
+        fixtures = _fixtures,
+        test_assert = test_assert,
+        test_assert_fatal = test_assert_fatal,
+        test_assert_false = test_assert_false,
+        test_assert_true = test_assert_true,
+    )
+
+test_config = struct(
+    fatal_on_fail = fatal_on_fail,
+    fixtures = tests().fixtures(),
+    message = "Running test: '{}'".format(test_name),
+    name = test_name,
+    name_full = "test_{}".format(test_name),
+    tests = tests(),
+)
+
+if config.tilt_subcommand == "ci":
+    local_resource(
+        test_config.name,
+        cmd = "echo -e '{}\n'".format(test_config.message),
+    )
+elif config.tilt_subcommand == "down":
+    if not hasattr(test_config.tests, test_config.name_full):
+        fail("Unknown test name: '{}'".format(test_config.name))
+
+    TEST = test_tilt(test_config.name, test_config.fatal_on_fail)
+    test_fn = getattr(test_config.tests, test_config.name_full)
+
+    TEST.print("")
+    TEST.print(test_config.message)
+    test_fn(TEST, test_config.fixtures)
+    TEST.print("")

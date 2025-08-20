@@ -1,0 +1,146 @@
+# buildifier: disable=module-docstring
+load("ext://color", "color")
+
+def _logstore(name = "", color_prefix = True):
+    """Create an object that produces Tilt logstore-styled messages.
+
+    Args:
+        name: Name of the logstore.
+        color_prefix: Whether to color the prefix.
+
+    Returns:
+        A logstore object.
+    """
+
+    def _config():
+        """Return the logstore configuration."""
+        return struct(
+            color_prefix = color_prefix,
+            max_size = 13,
+            name = name,
+        )
+
+    def _message(message, text_color = None):
+        """Return a logstore-styled message.
+
+        Args:
+            message: Message text.
+            text_color: Optional message color.
+        """
+        if text_color != None:
+            message = text_color(message)
+        if not _config().color_prefix:
+            text_color = None
+        return "{}{}".format(_prefix(_config().name, text_color), message)
+
+    def _prefix(name, text_color = None):
+        """Return a logstore-styled message prefix.
+
+        Args:
+            name: Name of the logstore.
+            text_color: Optional message color.
+        """
+        if name == "":
+            return ""
+
+        max_size = _config().max_size
+        spaces = ""
+        if len(name) > max_size:
+            name = name[:max_size - 1] + "…"
+        else:
+            spaces = " " * (max_size - len(name))
+
+        if text_color != None:
+            name = text_color(name)
+        return "{}{} │ ".format(spaces, name)
+
+    def _print(message, text_color = None):
+        """Print a logstore-styled message to the console.
+
+        Args:
+            message: Message text.
+            text_color: Optional message color.
+        """
+        print(_message(message, text_color))
+
+    return struct(**{
+        "message": _message,
+        "prefix": _prefix,
+        "print": _print,
+    })
+
+def test_tilt(name, fatal_on_fail = False):
+    """Create an object that performs basic test assertions.
+
+    Args:
+        name: Name of the testing object.
+        fatal_on_fail: Abort execution on failure when True.
+
+    Returns:
+        A test_tilt object.
+    """
+
+    LOGSTORE = _logstore(name, color_prefix = True)
+
+    def _assert(test_name, expected, actual, details = None):
+        """Perform a basic assertion that actual matches expected.
+
+        Args:
+            test_name: Name of the test.
+            expected: Expected result.
+            actual: Actual result.
+            details: Additional details to display on failure.
+
+        Returns:
+            True if the test passes, False otherwise.
+        """
+        if actual == expected:
+            print(_pass(test_name))
+            return True
+
+        if details == None:
+            details = "Expected '{}', but got '{}'".format(expected, actual)
+        output = _fail(test_name, details)
+        if fatal_on_fail:
+            fail(output)
+        print(output)
+        return False
+
+    def _assert_true(test_name, actual, details = None):
+        """Assert that the actual value is True."""
+        return _assert(test_name, True, actual, details)
+
+    def _assert_false(test_name, actual, details = None):
+        """Assert that the actual value is False."""
+        return _assert(test_name, False, actual, details)
+
+    def _fail(test_name, details = None):
+        """Return a test failure message.
+
+        Args:
+            test_name: Name of the test.
+            details: Additional details to display.
+        """
+        message = "[FAIL] {}".format(test_name)
+        if details != None:
+            message = "{}: {}".format(message, details)
+        return LOGSTORE.message(message, color.red)
+
+    def _pass(test_name, details = None):
+        """Return a test pass message.
+
+        Args:
+            test_name: Name of the test.
+            details: Additional details to display.
+        """
+        message = "[PASS] {}".format(test_name)
+        if details != None:
+            message = "{}: {}".format(message, details)
+        return LOGSTORE.message(message, color.green)
+
+    return struct(**{
+        "assert": _assert,
+        "false": _assert_false,
+        "print": LOGSTORE.print,
+        "true": _assert_true,
+    })
