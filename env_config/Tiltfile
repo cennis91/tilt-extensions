@@ -1,0 +1,107 @@
+# buildifier: disable=module-docstring
+_CAST_TYPE = "_type_"
+_CAST_VALUE = "_value_"
+_ENV_PREFIX = "TILT"
+
+def _cast(value, value_type = None):
+    """Cast or uncast a value for encoding and decoding."""
+    if type(value) != "dict":
+        return {_CAST_TYPE: value_type or type(value), _CAST_VALUE: value}
+
+    if len(value) == 2 and _CAST_TYPE in value:
+        value_type, value = value[_CAST_TYPE], value[_CAST_VALUE]
+        if value_type == "int":
+            return int(value)
+        elif value_type == "float":
+            return float(value)
+        elif value_type == "tuple":
+            return tuple(value)
+        elif value_type == "NoneType":
+            return value
+    return value
+
+def _key_encode(key):
+    """Convert a dot-notation key to an environment key."""
+    key = key.upper().replace(".", "__").replace("-", "_")
+    return "{}__{}".format(_ENV_PREFIX, key)
+
+def _value_decode(value):
+    """Decode an environment variable to a starlark object."""
+    if type(value) != "string":
+        return value
+
+    if value.lower() in ["true", "false"]:
+        return value.lower() == "true"
+    elif value.startswith("[") and value.endswith("]"):
+        return decode_json(value)
+    elif value.startswith("{") and value.endswith("}"):
+        return _cast(decode_json(value))
+    return value
+
+def _value_encode(value):
+    """Encode a starlark object to an environment variable."""
+    value_type = type(value)
+    if value_type == "bool":
+        return "true" if value else "false"
+    elif value_type in ["int", "float"]:
+        value = _cast(str(value), value_type)
+    elif value_type in ["NoneType"]:
+        value = _cast(value)
+    elif value_type == "tuple":
+        value = _cast(list(value), value_type)
+
+    if type(value) in ["list", "dict"]:
+        # FIXME: starlarkToJSONString sets the encoder indent to 2 spaces,
+        # this results in the encoded value having extra whitespace
+        return encode_json(value).replace("\n", "").strip()
+    return value
+
+# Exposed for testing, not intended to be used directly.
+env_fmt = struct(
+    decode = _value_decode,
+    encode = _value_encode,
+    name = _key_encode,
+)
+
+def env_config(namespace, defaults = {}):
+    """Creates an environment-backed config in a given namespace.
+
+    Args:
+        namespace: Dot-notation namespace for the config.
+        defaults: Default values for the config.
+
+    Returns:
+        Environment-backed config struct for the given namespace.
+    """
+
+    def _default(key):
+        """Returns the default value of a given key."""
+        if type(defaults) == "dict":
+            return defaults.get(key, None)
+        else:
+            return getattr(defaults, key, None)
+
+    def _get(key, default = None):
+        """Returns the value of a given key."""
+        default = _default(key) if default == None else default
+        value = os.getenv(_name(key), default)
+        return env_fmt.decode(value)
+
+    def _name(key):
+        """Returns the fully-qualified name of a given key."""
+        return env_fmt.name("{}.{}".format(namespace, key))
+
+    def _reset(key):
+        """Resets the value of a given key."""
+        os.unsetenv(_name(key))
+
+    def _set(key, value):
+        """Sets the value of a given key."""
+        os.putenv(_name(key), env_fmt.encode(value))
+
+    return struct(
+        default = _default,
+        get = _get,
+        reset = _reset,
+        set = _set,
+    )

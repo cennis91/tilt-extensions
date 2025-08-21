@@ -1,0 +1,203 @@
+# buildifier: disable=module-docstring
+load("ext://test/tilt", "test_tilt")
+load("../Tiltfile", "env_config", "env_fmt")
+
+# buildifier: disable=function-docstring
+def test_env_config(test, name, struct_defaults = False):
+    def _name(key):
+        return env_fmt.name("{}.{}".format(name, key))
+
+    defaults = {"message": "default"}
+    if struct_defaults:
+        defaults = struct(**defaults)
+
+    cfg = env_config(name, defaults)
+    key = "message"
+    prefix = "%s.%s" % (name, key)
+    test.print("")
+
+    # test the initial state
+    test.assert(
+        "%s.init.env" % prefix,
+        None,
+        os.getenv(_name(key), None),
+        "{} should not be defined in the environment".format(_name(key)),
+    )
+
+    test.assert("%s.init.default" % prefix, "default", cfg.default(key))
+    test.assert("%s.init.get" % prefix, "default", cfg.get(key))
+    test.assert("%s.init.get.override" % prefix, "override", cfg.get(key, "override"))
+
+    # test setting a value
+    cfg.set(key, "manual")
+    test.assert(
+        "%s.set.env" % prefix,
+        "manual",
+        os.getenv(_name(key), None),
+        "{} should be defined in the environment".format(_name(key)),
+    )
+
+    test.assert("%s.set.default" % prefix, "default", cfg.default(key))
+    test.assert("%s.set.get" % prefix, "manual", cfg.get(key))
+    test.assert("%s.set.get.override" % prefix, "manual", cfg.get(key, "override"))
+
+    # test resetting a value
+    cfg.reset(key)
+    test.assert(
+        "%s.reset.env" % prefix,
+        None,
+        os.getenv(_name(key), None),
+        "{} should not be defined in the environment".format(_name(key)),
+    )
+
+    test.assert("%s.reset.default" % prefix, "default", cfg.default(key))
+    test.assert("%s.reset.get" % prefix, "default", cfg.get(key))
+    test.assert("%s.reset.get.override" % prefix, "override", cfg.get(key, "override"))
+
+# buildifier: disable=function-docstring
+def test_env_config_types(test):
+    tests = [
+        ("none", "NoneType", None),
+        ("bool.true", "bool", True),
+        ("bool.false", "bool", False),
+        ("int.negative", "int", -1),
+        ("int.zero", "int", 0),
+        ("int.positive", "int", 1),
+        ("float.negative", "float", -1.0),
+        ("float.zero", "float", 0.0),
+        ("float.zero.negative", "float", -0.0),
+        ("float.positive", "float", 1.0),
+        ("string", "string", "foo"),
+        ("list", "list", [1, 2, 3]),
+        ("tuple", "tuple", (1, 2, 3)),
+        ("dict", "dict", {"foo": "bar"}),
+        # TODO: support struct?
+    ]
+
+    test.print("")
+    cfg = env_config("types", {"none": "Not None"})
+
+    for name, expected_type, value in tests:
+        cfg.set(name, value)
+        test.assert("type.%s" % name, expected_type, type(cfg.get(name)))
+        test.assert("type.%s.value" % name, value, cfg.get(name))
+
+# buildifier: disable=function-docstring
+def test_env_fmt_decode(test):
+    group_tests = {
+        "bool": [
+            ("true", True, "true"),
+            ("true.proper", True, "True"),
+            ("true.upper", True, "TRUE"),
+            ("false", False, "false"),
+            ("false.proper", False, "False"),
+            ("false.upper", False, "FALSE"),
+        ],
+        "string": [
+            ("empty", "", ""),
+            ("simple", "foo", "foo"),
+            ("spaces", "  foo ", "  foo "),
+            ("newlines", "foo\n\nbar\n", "foo\n\nbar\n"),
+        ],
+        "list": [
+            ("empty", [], "[]"),
+            # NOTE: there must not be leading or trailing whitespace to decode as JSON
+            ("spaces", ' ["foo"] ', ' ["foo"] '),
+            (
+                "mixed",
+                [None, 1, False, "foo", {"nested": []}],
+                '[null, 1, false, "foo", {"nested": []}]',
+            ),
+        ],
+        "dict": [
+            ("empty", {}, "{}"),
+            # NOTE: there must not be leading or trailing whitespace to decode as JSON
+            ("spaces", ' {"foo": "bar"} ', ' {"foo": "bar"} '),
+            (
+                "mixed",
+                {"null": None, "int": 1, "bool": True, "nested": [{"str": "foo"}]},
+                '{"bool": true, "int": 1, "nested": [{"str": "foo"}], "null": null}',
+            ),
+        ],
+    }
+
+    test.print("")
+    for group, tests in group_tests.items():
+        for name, expected, value in tests:
+            test_name = "decode.%s.%s" % (group, name)
+            test.assert(test_name, expected, env_fmt.decode(value))
+
+# buildifier: disable=function-docstring
+def test_env_fmt_encode(test):
+    group_tests = {
+        "bool": [
+            ("true", "true", True),
+            ("false", "false", False),
+        ],
+        "string": [
+            ("empty", "", ""),
+            ("simple", "foo", "foo"),
+            ("spaces", "  foo ", "  foo "),
+            ("newlines", "foo\n\nbar\n", "foo\n\nbar\n"),
+        ],
+        "list": [
+            ("empty", "[]", []),
+            # NOTE: there must not be leading or trailing whitespace to encode as JSON
+            ("spaces", ' ["foo"] ', ' ["foo"] '),
+            (
+                "mixed",
+                # NOTE: the encoder sets indent to 2 spaces
+                '[  1,  false,  "foo",  {    "nested": []  },  null]',
+                [1, False, "foo", {"nested": []}, None],
+            ),
+        ],
+        "dict": [
+            ("empty", "{}", {}),
+            # NOTE: there must not be leading or trailing whitespace to encode as JSON
+            ("spaces", ' {"foo": "bar"} ', ' {"foo": "bar"} '),
+            (
+                "mixed",
+                # NOTE: the encoder sets indent to 2 spaces and sorts keys automatically
+                '{  "bool": true,  "int": 1,  "nested": [    {      "str": "foo"    }  ],  "null": null}',
+                {"null": None, "int": 1, "bool": True, "nested": [{"str": "foo"}]},
+            ),
+        ],
+    }
+
+    test.print("")
+    for group, tests in group_tests.items():
+        for name, expected, value in tests:
+            test_name = "encode.%s.%s" % (group, name)
+            test.assert(test_name, expected, env_fmt.encode(value))
+
+# buildifier: disable=function-docstring
+def test_env_fmt_name(test):
+    tests = [
+        ("simple", "TILT__FOO", "foo"),
+        ("dash", "TILT__FOO_BAR", "foo-bar"),
+        ("underscore", "TILT__FOO_BAR", "foo_bar"),
+        ("dot", "TILT__FOO__BAR", "foo.bar"),
+        ("case", "TILT__FOO__BAR", "FoO.bAr"),
+        ("mixed", "TILT__FOO_BAR__BAZ_QUX", "foo-bar.baz_qux"),
+    ]
+
+    test.print("")
+    for name, expected, value in tests:
+        test.assert("name.%s" % name, expected, env_fmt.name(value))
+
+if config.tilt_subcommand == "down":
+    TEST_ENV_FMT = test_tilt("env_fmt")
+    test_env_fmt_name(TEST_ENV_FMT)
+    test_env_fmt_decode(TEST_ENV_FMT)
+    test_env_fmt_encode(TEST_ENV_FMT)
+
+    TEST_ENV_CONFIG = test_tilt("env_config")
+    test_env_config(TEST_ENV_CONFIG, "dict", struct_defaults = False)
+    test_env_config(TEST_ENV_CONFIG, "struct", struct_defaults = True)
+    test_env_config_types(TEST_ENV_CONFIG)
+    TEST_ENV_CONFIG.print("")
+
+local_resource(
+    "env_config",
+    cmd = "echo -e '{}\n'".format("env_config"),
+)
